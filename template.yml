@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: AppSync and DynamoDB demo.
+
+Resources:
+  # Using a global table to demo multi-region.
+  MyTable:
+    Type: AWS::DynamoDB::GlobalTable
+    Condition: CreateTable
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: ${self:custom.stackname}
+      Replicas:
+        - Region: us-east-1
+          PointInTimeRecoverySpecification:
+            PointInTimeRecoveryEnabled: true
+        - Region: us-west-2
+      AttributeDefinitions:
+        - AttributeName: path
+          AttributeType: S
+        - AttributeName: created
+          AttributeType: S
+      KeySchema:
+        - AttributeName: path
+          KeyType: HASH
+        - AttributeName: created
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification: # Required for global tables
+        StreamViewType: NEW_AND_OLD_IMAGES

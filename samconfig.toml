@@ -1,0 +1,10 @@
+version=0.1
+ [default.global.parameters]
+ stack_name = "appsync-dynamo-demo-stack"
+ 
+ [default.deploy.parameters]
+ confirm_changeset = true
+ capabilities = "CAPABILITY_IAM"
+
+ [default.build.parameters]
+ no_beta_features = true
