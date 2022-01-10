@@ -1,10 +1,18 @@
+# Demo of a table that stores website content accessed via GraphQL.
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
 Description: AppSync and DynamoDB demo.
 
+Conditions:
+  # Only deploy table in us-east-1.
+  CreateTable:
+    Fn::Equals:
+      - AWS::Region
+      - us-east-1
+
 Resources:
   # Using a global table to demo multi-region.
-  MyTable:
+  ContentTable:
     Type: AWS::DynamoDB::GlobalTable
     Condition: CreateTable
     DeletionPolicy: Retain
@@ -17,15 +25,94 @@ Resources:
             PointInTimeRecoveryEnabled: true
         - Region: us-west-2
       AttributeDefinitions:
-        - AttributeName: path
+        - AttributeName: itemId
           AttributeType: S
         - AttributeName: created
           AttributeType: S
       KeySchema:
-        - AttributeName: path
+        - AttributeName: itemId
           KeyType: HASH
         - AttributeName: created
           KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
       StreamSpecification: # Required for global tables
         StreamViewType: NEW_AND_OLD_IMAGES
+
+  DynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: DynamoAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt ContentTable.Arn
+
+  AppSyncApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: DemoApi
+      XrayEnabled: true
+      AuthenticationType: API_KEY
+
+  AppSyncApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+
+  AppSyncSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Definition: |
+        Definition: |
+        type Item {
+          itemId: ID!
+          title: String
+          created: String
+        }
+        type PaginatedItems {
+          Items: [Item!]!
+          nextToken: String
+        }
+        type Query {
+          allItems(limit: Int, nextToken: String): PaginatedItems!
+          getItem(itemId: ID!): Item
+        }
+        type Mutation {
+          saveItem(itemId: ID!, title: String!, created: String!): Item
+          deleteItem(itemId: ID!): Item
+        }
+        type Schema {
+          query: Query
+          mutation: Mutation
+        }
+
+  AppSyncDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      Name: ContentDataSource
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Description: 'Content table data source'
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt DynamoDBRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref ContentTable
+        AwsRegion: !Sub ${AWS::Region}
