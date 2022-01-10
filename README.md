@@ -1,0 +1,3 @@
+# Demo of using AWS SAM to create and deploy AppSync in front of DynamoDB
+
+WIP. Just trying out some things...
