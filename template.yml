@@ -3,27 +3,11 @@ AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
 Description: AppSync and DynamoDB demo.
 
-Conditions:
-  # Only deploy table in us-east-1.
-  CreateTable:
-    Fn::Equals:
-      - AWS::Region
-      - us-east-1
-
 Resources:
-  # Using a global table to demo multi-region.
-  ContentTable:
-    Type: AWS::DynamoDB::GlobalTable
-    Condition: CreateTable
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
+  DemoTable:
+    Type: AWS::DynamoDB::Table
     Properties:
-      TableName: ${self:custom.stackname}
-      Replicas:
-        - Region: us-east-1
-          PointInTimeRecoverySpecification:
-            PointInTimeRecoveryEnabled: true
-        - Region: us-west-2
+      TableName: !Sub appsync-demo-${AWS::Region}
       AttributeDefinitions:
         - AttributeName: itemId
           AttributeType: S
@@ -35,8 +19,6 @@ Resources:
         - AttributeName: created
           KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
-      StreamSpecification: # Required for global tables
-        StreamViewType: NEW_AND_OLD_IMAGES
 
   DynamoDBRole:
     Type: AWS::IAM::Role
@@ -63,7 +45,7 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:Query
                   - dynamodb:Scan
-                Resource: !GetAtt ContentTable.Arn
+                Resource: !GetAtt DemoTable.Arn
 
   AppSyncApi:
     Type: AWS::AppSync::GraphQLApi
@@ -82,14 +64,13 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApi.ApiId
       Definition: |
-        Definition: |
         type Item {
           itemId: ID!
           title: String
           created: String
         }
         type PaginatedItems {
-          Items: [Item!]!
+          items: [Item!]!
           nextToken: String
         }
         type Query {
@@ -108,11 +89,98 @@ Resources:
   AppSyncDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
-      Name: ContentDataSource
+      Name: DemoDataSource
       ApiId: !GetAtt AppSyncApi.ApiId
-      Description: 'Content table data source'
+      Description: 'Demo table data source'
       Type: AMAZON_DYNAMODB
       ServiceRoleArn: !GetAtt DynamoDBRole.Arn
       DynamoDBConfig:
-        TableName: !Ref ContentTable
+        TableName: !Ref DemoTable
         AwsRegion: !Sub ${AWS::Region}
+
+  AppSyncAllItemsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: allItems
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Scan",
+          "limit": $util.defaultIfNull(${ctx.args.limit},20),
+          "nextToken": $util.toJson(${ctx.args.nextToken})
+        }
+      ResponseMappingTemplate: |
+        {
+          "items": $util.toJson($ctx.result.items),
+          "nextToken": $util.toJson(${ctx.args.nextToken})
+        }
+
+  AppSyncGetItemResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: getItem
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "GetItem",
+          "key": {
+            "itemId": $util.dynamodb.toDynamoDBJson($ctx.args.itemId)
+          }
+        }
+      ResponseMappingTemplate: '$util.toJson($ctx.result)'
+
+  AppSyncUpdateItemResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: saveItem
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "PutItem",
+          "key": {
+            "itemId": $util.dynamodb.toDynamoDBJson($ctx.args.itemId)
+          },
+          "attributeValues": {
+            "title": $util.dynamodb.toDynamoDBJson($ctx.args.title),
+            "created": $util.dynamodb.toDynamoDBJson($ctx.args.created)
+          }
+        }
+      ResponseMappingTemplate: '$util.toJson($ctx.result)'
+
+  AppSyncDeleteItemResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: deleteItem
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "DeleteItem",
+          "key": {
+            "itemId": $util.dynamodb.toDynamoDBJson($ctx.args.itemId)
+          }
+        }
+      ResponseMappingTemplate: '$util.toJson($ctx.result)'
+
+Outputs:
+  GraphQLApiEndpoint:
+    Description: URL for GraphQL endpoint.
+    Value: !GetAtt AppSyncApi.GraphQLUrl
+  APIKey:
+    Description: API Key endpoint (header key name 'x-api-key').
+    Value: !GetAtt AppSyncApiKey.ApiKey

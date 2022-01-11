@@ -1,3 +1,3 @@
-# Demo of using AWS SAM to create and deploy AppSync in front of DynamoDB
+# AWS SAM demo – create and deploy AppSync in front of DynamoDB
 
-WIP. Just trying out some things...
+Quick demo of using AWS SAM to create an AppSync GraphQL api in front of DynamoDB. This is a scratchpad for another project, testing some things out.

@@ -5,6 +5,8 @@ version=0.1
  [default.deploy.parameters]
  confirm_changeset = true
  capabilities = "CAPABILITY_IAM"
+ region = "us-east-1"
+ image_repositories = []
 
  [default.build.parameters]
- no_beta_features = true
+ no_beta_features = false
